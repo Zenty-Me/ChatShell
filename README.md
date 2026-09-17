@@ -499,7 +499,9 @@ src/
     store.js               配置持久化（只写与默认值的差异）
     paths.js / log.js / defaults.js
   preload/
-    site-preload.js        ★ 注入层本体（自包含，容错）
+    site-preload.js        ★ 注入层本体（容错）。引了 turndown 等 npm 依赖，
+                             由 esbuild 打包成 dist/preload/ 下的单文件再加载
+                             （sandbox 的 preload 只能 require('electron')，必须内联）
     chrome-preload.js      标题栏桥
     palette-preload.js     调色板桥
   inject/
@@ -508,13 +510,34 @@ src/
   renderer/
     chrome.html/.css/.js   自绘标题栏
     palette.html/.css/.js  Prompt 调色板
-    quickask.html/.css/.js 快捷问答面板
+    quickask.html/.css/.js 快捷问答面板（Markdown 复用 marked + DOMPurify 渲染）
+dist/                      构建产物（preload bundle），自动生成、gitignore 忽略
     error.html/.js         加载失败兜底页
 scripts/
-  launch.js                启动器（清 ELECTRON_RUN_AS_NODE）
+  launch.js                启动器（清 ELECTRON_RUN_AS_NODE；启动前按需重建 preload bundle）
+  build-preload.js         把 site-preload 打成单文件（esbuild 内联 npm 依赖）
   make-icon.js             纯 Node 生成图标
   syntax-check.js          静态自检
 ```
+
+## 复用的成熟依赖（不重复造轮子）
+
+| 依赖 | 替代了什么 | 用在哪 |
+| --- | --- | --- |
+| [marked](https://www.npmjs.com/package/marked) | 手写的 Markdown 渲染器（原 200 行） | 快捷问答面板正文渲染 |
+| [DOMPurify](https://www.npmjs.com/package/dompurify) | 手写的白名单转义 | 同上（站点内容=外部输入，消毒不能省） |
+| [turndown](https://www.npmjs.com/package/turndown) (+[gfm 插件](https://www.npmjs.com/package/turndown-plugin-gfm)) | 手写的 HTML→Markdown DOM 遍历（原 180 行） | 注入层读回复转 Markdown |
+| [electron-log](https://www.npmjs.com/package/electron-log) | 手写的「console + appendFile」（原 30 行） | 全部日志（多了轮转/异常捕获） |
+| [esbuild](https://www.npmjs.com/package/esbuild) | ——（新增的构建工具） | 把 site-preload 和它的依赖打成单文件 |
+
+**为什么 preload 要打包**：preload 运行在 sandbox 里，只能 `require('electron')`，
+引不了任何 npm 包 —— 所以用 esbuild 把依赖内联成单文件（产物在 `dist/preload/`，
+被 gitignore 忽略）。**launch.js 启动前会对比源文件和 bundle 的新旧，需要时自动重建**，
+平时开发不用管；`npm run build:preload` 可以手动触发。
+
+**刻意没换的**：`store.js`（配置只写差异 + 迁移是本项目定制逻辑，`electron-store` 不覆盖）、
+`useragent.js`（没有维护良好的同类库）、`syntax-check.js`（用的是 Node 内置 `vm`，
+不是手写解析器）、注入层的页内 toast/悬浮条（必须极轻量，引库不划算）。
 
 ---
 

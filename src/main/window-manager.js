@@ -235,7 +235,8 @@ class AppWindow {
       webPreferences: {
         // ★ 登录态持久化的唯一开关：persist: 前缀 + 全程不清理存储
         partition: site.partition,
-        preload: path.join(PATHS.preload, 'site-preload.js'),
+        // site-preload 用了第三方依赖（turndown），sandbox 下只能加载打包后的单文件 bundle
+        preload: path.join(PATHS.dist, 'preload', 'site-preload.js'),
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,

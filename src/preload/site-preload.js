@@ -358,203 +358,66 @@ async function applyPrompt(text, submit) {
 }
 
 /* ========================================================================== */
-/*                          HTML → Markdown（读渲染后的 DOM）                   */
+/*              HTML → Markdown（复用 turndown + 少量站点规则）                 */
 /* ========================================================================== */
 
-const BLOCK_TAGS = new Set([
-  'div', 'p', 'section', 'article', 'main', 'header', 'footer', 'aside',
-  'ul', 'ol', 'li', 'pre', 'blockquote', 'table', 'thead', 'tbody', 'tr',
-  'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'figure', 'figcaption', 'details', 'summary',
-]);
+const TurndownService = require('turndown');
+const turndownPluginGfm = require('turndown-plugin-gfm');
 
-function isBlockTag(el) {
-  return el && el.tagName && BLOCK_TAGS.has(el.tagName.toLowerCase());
-}
+const turndown = new TurndownService({
+  headingStyle: 'atx',
+  codeBlockStyle: 'fenced',
+  bulletListMarker: '-',
+  emDelimiter: '*',
+});
+turndown.use(turndownPluginGfm.gfm); // 表格 / 删除线 / 任务列表
 
-function nodeToMd(node, depth) {
-  if (!node) return '';
-  if (node.nodeType === 3) {
-    const t = String(node.nodeValue || '').replace(/[ \t\r\n]+/g, ' ');
-    return t.trim() ? t : t.length ? ' ' : '';
-  }
-  if (node.nodeType !== 1) return '';
-  return elementToMd(node, depth);
-}
+// 站点特有的「不属于回复内容」的东西：我们注入的 UI、代码块顶栏（语言名 + 复制/下载按钮）。
+// 不跳过的话正文里会混进「python 复制 下载」这种噪声（实测踩过）。
+turndown.addRule('skip-site-noise', {
+  filter: (node) =>
+    node.nodeType === 1 &&
+    (node.hasAttribute('data-cs-ui') || /md-code-block-banner/.test(node.className || '')),
+  replacement: () => '',
+});
 
-function childrenToMd(el, depth) {
-  return Array.from(el.childNodes)
-    .map((n) => nodeToMd(n, depth))
-    .join('');
-}
-
-function cleanInline(el) {
-  return childrenToMd(el, 0).replace(/\s+/g, ' ').trim();
-}
-
-function preToMd(pre) {
-  const code = pre.querySelector('code') || pre;
-  let lang = '';
-  const m = /language-([\w+#.-]+)/.exec(String(code.className || ''));
-  if (m) lang = m[1];
-  else if (code.getAttribute && code.getAttribute('data-language')) lang = code.getAttribute('data-language');
-
-  // 取不到就从顶栏捞一下：顶栏整体被跳过了（见 elementToMd），
-  // 但语言名有价值 —— 顶栏形如「python 复制 下载」，去掉按钮文案剩下的就是语言名。
-  if (!lang) {
-    const block = pre.closest ? pre.closest('[class*="md-code-block"]') : null;
-    const banner = block && block.querySelector('[class*="md-code-block-banner"]');
-    if (banner) {
-      const guess = String(banner.textContent || '')
-        .replace(/\s*(复制|下载|copy|download)\s*/gi, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-      if (guess && guess.length <= 20 && !/\s/.test(guess)) lang = guess.toLowerCase();
-    }
-  }
-
-  const raw = String(code.textContent || '').replace(/\s+$/, '');
-  return `\n\n\`\`\`${lang}\n${raw}\n\`\`\`\n\n`;
-}
-
-function listToMd(listEl, depth) {
-  const ordered = listEl.tagName.toLowerCase() === 'ol';
-  const pad = '  '.repeat(depth);
-  let out = '\n';
-  let i = 1;
-
-  for (const li of Array.from(listEl.children)) {
-    if (li.tagName.toLowerCase() !== 'li') continue;
-    let text = '';
-    let nested = '';
-    for (const child of Array.from(li.childNodes)) {
-      if (child.nodeType === 1 && /^(ul|ol)$/i.test(child.tagName)) {
-        nested += listToMd(child, depth + 1);
-      } else if (child.nodeType === 1 && isBlockTag(child)) {
-        text += `\n${childrenToMd(child, depth + 1).trim()}`;
-      } else {
-        text += nodeToMd(child, depth);
+// 代码块：站点的语言名不在 <code class="language-x"> 里，而是放在顶栏 —— 单独捞一下
+turndown.addRule('fenced-code-with-lang', {
+  filter: (node) => node.nodeName === 'PRE',
+  replacement: (_content, node) => {
+    const code = node.querySelector('code') || node;
+    let lang =
+      (/(?:language-)([\w+#.-]+)/.exec(String(code.className || '')) || [])[1] ||
+      code.getAttribute('data-language') ||
+      '';
+    if (!lang) {
+      const block = node.closest && node.closest('[class*="md-code-block"]');
+      const banner = block && block.querySelector('[class*="md-code-block-banner"]');
+      if (banner) {
+        const guess = String(banner.textContent || '')
+          .replace(/\s*(复制|下载|copy|download)\s*/gi, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+        if (guess && guess.length <= 20 && !guess.includes(' ')) lang = guess.toLowerCase();
       }
     }
-    const marker = ordered ? `${i}.` : '-';
-    const body = text.trim().replace(/\n/g, `\n${pad}  `);
-    out += `${pad}${marker} ${body}\n`;
-    if (nested) out += nested;
-    i++;
-  }
-  return `${out}\n`;
-}
-
-function tableToMd(table) {
-  const rows = Array.from(table.querySelectorAll('tr'));
-  if (!rows.length) return '';
-  const grid = rows.map((tr) =>
-    Array.from(tr.children).map((td) => childrenToMd(td, 0).replace(/\s+/g, ' ').trim())
-  );
-  const width = Math.max(...grid.map((r) => r.length));
-  const lines = [];
-  grid.forEach((row, idx) => {
-    const padded = row.concat(Array(Math.max(0, width - row.length)).fill(''));
-    lines.push(`| ${padded.join(' | ')} |`);
-    if (idx === 0) lines.push(`| ${padded.map(() => '---').join(' | ')} |`);
-  });
-  return `\n\n${lines.join('\n')}\n\n`;
-}
-
-function elementToMd(el, depth) {
-  const tag = el.tagName.toLowerCase();
-
-  if (el.hasAttribute && el.hasAttribute('data-cs-ui')) return ''; // 跳过我们注入的 UI
-
-  // 代码块的顶栏（语言名 + 复制/下载按钮）是站点的 UI，不是回复内容。
-  // 不跳过的话，正文里会混进「python 复制 下载」这种噪声（实测踩过这个坑）。
-  if (el.classList && /md-code-block-banner/.test(String(el.className))) return '';
-  switch (tag) {
-    case 'script':
-    case 'style':
-    case 'svg':
-    case 'noscript':
-    case 'button':
-    case 'textarea':
-    case 'input':
-    case 'select':
-    case 'nav':
-      return '';
-    case 'br':
-      return '  \n';
-    case 'hr':
-      return '\n\n---\n\n';
-    case 'h1':
-    case 'h2':
-    case 'h3':
-    case 'h4':
-    case 'h5':
-    case 'h6': {
-      const text = cleanInline(el);
-      return text ? `\n\n${'#'.repeat(Number(tag[1]))} ${text}\n\n` : '';
-    }
-    case 'pre':
-      return preToMd(el);
-    case 'code':
-      return `\`${String(el.textContent || '').trim()}\``;
-    case 'strong':
-    case 'b': {
-      const t = cleanInline(el);
-      return t ? `**${t}**` : '';
-    }
-    case 'em':
-    case 'i': {
-      const t = cleanInline(el);
-      return t ? `*${t}*` : '';
-    }
-    case 'del':
-    case 's': {
-      const t = cleanInline(el);
-      return t ? `~~${t}~~` : '';
-    }
-    case 'a': {
-      const href = el.getAttribute('href') || '';
-      const t = cleanInline(el);
-      if (!t) return '';
-      return href && !href.startsWith('javascript:') ? `[${t}](${href})` : t;
-    }
-    case 'img': {
-      const src = el.getAttribute('src') || '';
-      if (!src || src.startsWith('data:')) return el.getAttribute('alt') ? `[图片: ${el.getAttribute('alt')}]` : '[图片]';
-      return `![${el.getAttribute('alt') || ''}](${src})`;
-    }
-    case 'ul':
-    case 'ol':
-      return listToMd(el, depth);
-    case 'table':
-      return tableToMd(el);
-    case 'blockquote': {
-      const inner = childrenToMd(el, depth).trim();
-      if (!inner) return '';
-      return `\n\n${inner
-        .split('\n')
-        .map((l) => `> ${l}`)
-        .join('\n')}\n\n`;
-    }
-    case 'li': {
-      const t = childrenToMd(el, depth).trim();
-      return t ? `${'  '.repeat(depth)}- ${t}\n` : '';
-    }
-    default: {
-      const inner = childrenToMd(el, depth);
-      if (!isBlockTag(el)) return inner;
-      const t = inner.replace(/[ \t]+\n/g, '\n').trim();
-      return t ? `\n\n${t}\n\n` : '';
-    }
-  }
-}
+    const raw = String(code.textContent || '').replace(/\s+$/, '');
+    return `\n\n\`\`\`${lang}\n${raw}\n\`\`\`\n\n`;
+  },
+});
 
 function htmlToMarkdown(root) {
   if (!root) return '';
-  const md = elementToMd(root, 0);
-  return md
-    .replace(/\n{3,}/g, '\n\n')
-    .replace(/[ \t]+$/gm, '')
-    .trim();
+  try {
+    return turndown
+      .turndown(root)
+      .replace(/\n{3,}/g, '\n\n')
+      .replace(/[ \t]+$/gm, '')
+      .trim();
+  } catch (err) {
+    debug(`HTML→Markdown 失败(已忽略): ${err.message}`);
+    return String(root.textContent || '').trim();
+  }
 }
 
 /* ========================================================================== */

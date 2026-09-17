@@ -13,6 +13,7 @@
  */
 
 const { spawn } = require('child_process');
+const fs = require('fs');
 const path = require('path');
 
 const env = { ...process.env };
@@ -25,18 +26,58 @@ if (typeof binary !== 'string') {
 }
 
 const appDir = path.resolve(__dirname, '..');
-const child = spawn(binary, [appDir, ...process.argv.slice(2)], {
-  stdio: 'inherit',
-  env,
-  windowsHide: false,
-});
 
-child.on('error', (err) => {
-  console.error(`[launch] 启动 Electron 失败: ${err.message}`);
-  process.exit(1);
-});
+/* --------------------------------------------------------------------------
+ * site-preload 的 bundle 按需重建。
+ *
+ * preload 引了第三方依赖（turndown），sandbox 下只能加载打包后的单文件，
+ * 所以源文件改了就要重新打包。这里对比「源文件 vs bundle」的修改时间，
+ * 需要时自动跑一次 —— 开发时改 preload 不用记得手动 build，无感。
+ * ------------------------------------------------------------------------ */
+const SRC = path.join(appDir, 'src', 'preload', 'site-preload.js');
+const BUNDLE = path.join(appDir, 'dist', 'preload', 'site-preload.js');
 
-child.on('exit', (code, signal) => {
-  if (signal) process.exit(1);
-  process.exit(code == null ? 0 : code);
-});
+function mtimeOf(file) {
+  try {
+    return fs.statSync(file).mtimeMs;
+  } catch (_) {
+    return 0;
+  }
+}
+
+if (mtimeOf(BUNDLE) < mtimeOf(SRC)) {
+  try {
+    // 用独立子进程跑，esbuild 的报错格式和正常输出一致
+    const r = spawn(process.execPath, [path.join(__dirname, 'build-preload.js')], { stdio: 'inherit', env });
+    r.on('exit', (code) => {
+      if (code !== 0) {
+        console.error('[launch] site-preload 打包失败，应用可能加载不到注入层。');
+        process.exit(1);
+      }
+      spawnElectron();
+    });
+  } catch (err) {
+    console.error(`[launch] site-preload 打包异常: ${err.message}`);
+    process.exit(1);
+  }
+} else {
+  spawnElectron();
+}
+
+function spawnElectron() {
+  const child = spawn(binary, [appDir, ...process.argv.slice(2)], {
+    stdio: 'inherit',
+    env,
+    windowsHide: false,
+  });
+
+  child.on('error', (err) => {
+    console.error(`[launch] 启动 Electron 失败: ${err.message}`);
+    process.exit(1);
+  });
+
+  child.on('exit', (code, signal) => {
+    if (signal) process.exit(1);
+    process.exit(code == null ? 0 : code);
+  });
+}

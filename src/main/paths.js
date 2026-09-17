@@ -15,6 +15,7 @@ const PATHS = {
   renderer: path.join(ROOT, 'src', 'renderer'),
   preload: path.join(ROOT, 'src', 'preload'),
   inject: path.join(ROOT, 'src', 'inject'),
+  dist: path.join(ROOT, 'dist'), // 构建产物（site-preload 的 bundle），gitignore 忽略
   userData: app.getPath('userData'),
   configFile: path.join(app.getPath('userData'), 'config.json'),
   promptsFile: path.join(app.getPath('userData'), 'prompts.json'),

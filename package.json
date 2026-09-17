@@ -15,6 +15,7 @@
     "test:ask": "node scripts/launch.js --test-quickask",
     "probe:chat": "node scripts/launch.js --probe-chat",
     "check": "node scripts/syntax-check.js",
+    "build:preload": "node scripts/build-preload.js",
     "icon": "node scripts/make-icon.js",
     "pack:dir": "electron-builder --dir",
     "dist": "electron-builder"
@@ -28,6 +29,7 @@
     },
     "files": [
       "src/**/*",
+      "dist/**/*",
       "package.json",
       "!**/*.map"
     ],
@@ -64,12 +66,14 @@
   },
   "devDependencies": {
     "electron": "^44.4.1",
-    "electron-builder": "^26.15.3"
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.2"
   },
   "dependencies": {
     "dompurify": "^3.4.15",
     "electron-log": "^5.4.4",
     "marked": "^18.0.13",
-    "turndown": "^7.2.4"
+    "turndown": "^7.2.4",
+    "turndown-plugin-gfm": "^1.0.2"
   }
 }
