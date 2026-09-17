@@ -1,0 +1,231 @@
+/*
+ * 注入层样式。
+ *
+ * ★ 三条必须遵守的规则，都是踩过坑总结出来的：
+ *
+ *   1) 开关状态用 **data-* 属性**，不用 class。
+ *      血的教训：开关类名 `ds-hide-sidebar` 加在 <html> 上，而选择器里有
+ *      `[class*='sidebar']` —— 这个属性值恰好包含 "sidebar"，于是规则匹配到了
+ *      <html> 自己，一条 `display:none !important` 把整页清空（纯白屏）。
+ *      换成 data-cs-hide-sidebar="on" 之后，[class*=...] 永远不可能匹配到它。
+ *
+ *   2) 候选选择器必须用 `:is(...)` 整体包裹。
+ *      直接写 `html[data-...] {{sidebar}}` 只在第一个候选上生效，
+ *      逗号后面的候选会变成「无条件生效」——同样是灾难。
+ *
+ *   3) 隐藏类规则一律加 `:not(html):not(body)` 兜底。
+ *      不管选择器怎么改，都永远不可能把文档根节点藏起来。
+ *
+ * {{占位符}} 由主进程用 selectors.json 渲染成真实选择器；空组渲染成 .cs-never-match。
+ */
+
+/* ============================ 紧凑模式 ============================ */
+
+/* 细滚动条：垂直空间焦虑的一半来自这里 */
+html[data-cs-inject='on'][data-cs-compact='on'] *::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+html[data-cs-inject='on'][data-cs-compact='on'] *::-webkit-scrollbar-thumb {
+  background: rgba(128, 128, 128, 0.4);
+  border-radius: 4px;
+}
+html[data-cs-inject='on'][data-cs-compact='on'] *::-webkit-scrollbar-thumb:hover {
+  background: rgba(128, 128, 128, 0.62);
+}
+html[data-cs-inject='on'][data-cs-compact='on'] *::-webkit-scrollbar-track,
+html[data-cs-inject='on'][data-cs-compact='on'] *::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* 去掉回复块的外边距（只动 margin，不动 padding/line-height，避免改坏排版） */
+html[data-cs-inject='on'][data-cs-compact='on'] :is({{assistantMessage}}):not(html):not(body) {
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+}
+
+/* 输入区上方的多余留白 */
+html[data-cs-inject='on'][data-cs-compact='on'] :is({{composer}}):not(html):not(body) {
+  margin-top: 0 !important;
+}
+
+/* ============================ 隐藏干扰元素 ============================ */
+
+html[data-cs-inject='on'][data-cs-hide-extras='on'] :is({{extras}}):not(html):not(body) {
+  display: none !important;
+}
+
+/* ============================ 隐藏左侧栏 ============================ */
+
+html[data-cs-inject='on'][data-cs-hide-sidebar='on'] :is({{sidebar}}):not(html):not(body) {
+  display: none !important;
+}
+
+/* ============================ 风控拦截页提示 ============================
+   被 WAF/边缘节点拦下来时，页面只有十几个元素，用户很容易误判成
+   「桌面壳坏了」或「站点改版了」。这个横幅就是为了把话说清楚。
+   只在命中拦截特征时出现（元素数偏少但无特征时不弹，避免误报）。        */
+
+#cs-block-notice {
+  position: fixed;
+  left: 50%;
+  top: 16px;
+  transform: translateX(-50%);
+  z-index: 2147483002;
+  max-width: 620px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: #7a3b00;
+  background: #fff6e5;
+  border: 1px solid #f0c98a;
+  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.18);
+}
+
+#cs-block-notice .cs-block-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+#cs-block-notice .cs-block-reason {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 11.5px;
+  color: #9a5b12;
+  margin-bottom: 6px;
+  word-break: break-all;
+}
+
+#cs-block-notice .cs-block-tip {
+  color: #8a5a1e;
+  margin-bottom: 10px;
+}
+
+#cs-block-notice .cs-block-actions {
+  display: flex;
+  gap: 8px;
+}
+
+#cs-block-notice button {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  padding: 5px 12px;
+  border-radius: 7px;
+  font-size: 12px;
+  color: #7a3b00;
+  background: #ffffff;
+  border: 1px solid #f0c98a;
+}
+#cs-block-notice button:hover {
+  background: #fffaf0;
+  border-color: #e0a94f;
+}
+
+@media (prefers-color-scheme: dark) {
+  #cs-block-notice {
+    color: #f5d7a8;
+    background: #3a2d16;
+    border-color: #6b5220;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+  }
+  #cs-block-notice .cs-block-reason {
+    color: #e0b877;
+  }
+  #cs-block-notice .cs-block-tip {
+    color: #cfa963;
+  }
+  #cs-block-notice button {
+    color: #f5d7a8;
+    background: #4a3a1c;
+    border-color: #6b5220;
+  }
+}
+
+/* ============================ 页内悬浮条 ============================
+   放**左边缘**而不是右边缘：右边是发送按钮的地盘（实测发送按钮就在输入框
+   右下角），靠右会挡住它。左侧栏隐藏后左边是空的，最安全。            */
+
+#cs-fab {
+  position: fixed;
+  left: 10px;
+  top: 42%;
+  z-index: 2147483000;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  opacity: 0.3;
+  transition: opacity 0.18s ease;
+  pointer-events: auto;
+}
+#cs-fab:hover {
+  opacity: 1;
+}
+
+#cs-fab button {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  min-width: 44px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  font-size: 11px;
+  line-height: 1.25;
+  text-align: center;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+  color: #374151;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.12);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  user-select: none;
+}
+#cs-fab button:hover {
+  color: #1d4ed8;
+  border-color: rgba(77, 107, 254, 0.5);
+  background: rgba(255, 255, 255, 0.98);
+}
+#cs-fab button:active {
+  transform: translateY(1px);
+}
+
+@media (prefers-color-scheme: dark) {
+  #cs-fab button {
+    color: #e5e7eb;
+    background: rgba(38, 40, 44, 0.88);
+    border-color: rgba(255, 255, 255, 0.12);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  }
+  #cs-fab button:hover {
+    color: #a5b4fc;
+    border-color: rgba(129, 150, 255, 0.6);
+    background: rgba(48, 51, 56, 0.98);
+  }
+}
+
+/* ============================ 页内提示 ============================ */
+
+#cs-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 88px;
+  transform: translate(-50%, 8px);
+  z-index: 2147483001;
+  padding: 8px 14px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+  color: #ffffff;
+  background: rgba(17, 24, 39, 0.9);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+#cs-toast.cs-toast-visible {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}

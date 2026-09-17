@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:"
+    />
+    <title>ChatShell</title>
+    <link rel="stylesheet" href="chrome.css" />
+  </head>
+  <body>
+    <!--
+      整条标题栏就是拖拽区（JS 接管，见 chrome.js）。窗口很窄时自动收起
+      Tab 条和导航按钮，改显示当前会话标题 —— 小窗口里位置更值钱。
+    -->
+    <header class="titlebar" id="titlebar" title="按住拖动窗口">
+      <div class="brand" title="ChatShell —— 网页版 AI 的桌面外壳">
+        <span class="brand-mark">CS</span>
+      </div>
+
+      <button class="icon-btn" id="btn-newtab" title="新会话 (Ctrl+T)">＋</button>
+
+      <div class="nav-group">
+        <button class="icon-btn" id="btn-back" title="后退">‹</button>
+        <button class="icon-btn" id="btn-forward" title="前进">›</button>
+        <button class="icon-btn" id="btn-reload" title="刷新 (Ctrl+R)">⟳</button>
+      </div>
+
+      <nav class="tabstrip" id="tabstrip" aria-label="会话标签"></nav>
+      <div class="title-label" id="title-label">DeepSeek</div>
+
+      <div class="spacer"></div>
+
+      <button class="text-btn" id="btn-palette" title="Prompt 模板库 (Ctrl+Alt+P)">提示词</button>
+      <button class="icon-btn" id="btn-size" title="紧凑 / 展开窗口">⤢</button>
+      <button class="icon-btn" id="btn-pin" title="窗口置顶">⌖</button>
+      <button class="icon-btn extra-only" id="btn-diag" title="选择器自检（站点改版后点这里）">◍</button>
+
+      <div class="win-controls">
+        <button class="win-btn" id="win-min" title="最小化">─</button>
+        <button class="win-btn" id="win-max" title="最大化">▢</button>
+        <button class="win-btn danger" id="win-close" title="关闭（默认收进托盘，热键可唤回）">✕</button>
+      </div>
+    </header>
+
+    <script src="chrome.js"></script>
+  </body>
+</html>

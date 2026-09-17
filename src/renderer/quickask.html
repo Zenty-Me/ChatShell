@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:"
+    />
+    <title>快捷问答</title>
+    <link rel="stylesheet" href="quickask.css" />
+  </head>
+  <body>
+    <div class="panel">
+      <!-- 输入行：呼出即打字，Enter 发送 -->
+      <div class="composer">
+        <span class="spark" aria-hidden="true">✦</span>
+        <textarea
+          id="input"
+          rows="1"
+          placeholder="问点什么…  Enter 发送 · Shift+Enter 换行"
+          spellcheck="false"
+        ></textarea>
+        <div class="actions">
+          <button id="btn-new" class="ghost" title="开启新会话（清空上下文记忆）">新会话</button>
+          <button id="btn-open" class="ghost" title="在完整窗口里继续（会话保留在历史里）">
+            展开
+          </button>
+        </div>
+      </div>
+
+      <!-- 内容区：多轮对话 -->
+      <div class="content" id="content">
+        <div class="hint" id="hint">
+          <div class="hint-title" id="hint-title">快捷问答</div>
+          <div class="hint-body" id="hint-body">
+            输入问题按 Enter —— 答案由已登录的 DeepSeek 网页版生成。<br />
+            这是一个独立会话，多轮对话有上下文记忆，直到退出应用。
+          </div>
+        </div>
+
+        <!-- 每一轮由 quickask.js 生成：问题 + 可折叠的思考过程 + Markdown 正文 -->
+        <div class="turns" id="turns"></div>
+      </div>
+
+      <!-- 状态栏 -->
+      <div class="statusbar">
+        <span class="keys"><kbd>ESC</kbd> 关闭</span>
+        <span class="keys hidden" id="copy-hint"><kbd>C</kbd> 复制回答</span>
+        <span class="grow"></span>
+        <span class="note" id="note"></span>
+        <span class="spinner hidden" id="spinner"></span>
+      </div>
+    </div>
+
+    <!-- Markdown 渲染直接复用成熟库：marked 负责解析，DOMPurify 负责消毒。
+         内容是站点生成的外部内容（相当于用户输入），消毒这步不能省。 -->
+    <script src="../../node_modules/marked/lib/marked.umd.js"></script>
+    <script src="../../node_modules/dompurify/dist/purify.js"></script>
+    <script src="quickask.js"></script>
+  </body>
+</html>

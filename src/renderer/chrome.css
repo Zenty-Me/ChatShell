@@ -1,0 +1,325 @@
+/* ==========================================================================
+   自定义标题栏。40px 高，省下来的垂直空间就是从原生标题栏里抠出来的。
+
+   拖拽：整条标题栏都能按住拖动窗口 —— 由 JS 接管（见 chrome.js 的 pointer 事件），
+   不用 -webkit-app-region: drag。原因：那套依赖 Electron 对 WebContentsView 的
+   拖拽区支持，行为不好验证也不好测；JS 接管确定可用，而且顺手能记录位置。
+   所以这里必须写 -webkit-app-region: no-drag，否则两种机制会打架。
+
+   主题跟随主进程下发的 nativeTheme（data-theme="light|dark"）。
+   窄窗口（<640px）会自动收起 Tab 条和导航按钮，改显示当前会话标题。
+   ========================================================================== */
+
+:root {
+  --bar-height: 40px;
+  --accent: #4d6bfe;
+  --text: #1f2328;
+  --text-dim: #6b7280;
+  --bar-bg: #f2f3f5;
+  --tab-bg: transparent;
+  --tab-active-bg: #ffffff;
+  --hover-bg: rgba(15, 23, 42, 0.06);
+  --press-bg: rgba(15, 23, 42, 0.12);
+  --border: rgba(15, 23, 42, 0.1);
+  --shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
+  --win-btn-width: 44px;
+}
+
+html[data-theme='dark'] {
+  --text: #e6e8eb;
+  --text-dim: #9aa0a6;
+  --bar-bg: #1f2023;
+  --tab-active-bg: #2c2e33;
+  --hover-bg: rgba(255, 255, 255, 0.08);
+  --press-bg: rgba(255, 255, 255, 0.16);
+  --border: rgba(255, 255, 255, 0.1);
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: var(--bar-height);
+  overflow: hidden;
+  background: var(--bar-bg);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
+  font-size: 12.5px;
+  color: var(--text);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.titlebar {
+  height: var(--bar-height);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 0 0 8px;
+  background: var(--bar-bg);
+  border-bottom: 1px solid var(--border);
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+  cursor: grab; /* 提示：这里可以按住拖动窗口 */
+}
+
+body.dragging,
+body.dragging * {
+  cursor: grabbing !important;
+}
+
+/* ------------------------------- 品牌标记 ------------------------------- */
+
+.brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 22px;
+  flex: 0 0 auto;
+}
+
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  box-shadow: var(--shadow);
+}
+
+/* ------------------------------- 通用按钮 ------------------------------- */
+
+button {
+  all: unset;
+  cursor: pointer;
+  color: var(--text);
+  border-radius: 6px;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.icon-btn {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--text-dim);
+}
+
+.text-btn {
+  flex: 0 0 auto;
+  height: 24px;
+  padding: 0 9px;
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+button:hover {
+  background: var(--hover-bg);
+}
+button:active {
+  background: var(--press-bg);
+}
+button:disabled {
+  opacity: 0.34;
+  cursor: default;
+  background: transparent;
+}
+
+.icon-btn.on {
+  color: var(--accent);
+  background: rgba(77, 107, 254, 0.14);
+}
+
+.nav-group {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* ------------------------------- 标签条 ------------------------------- */
+
+.tabstrip {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 30px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.tabstrip::-webkit-scrollbar {
+  display: none;
+}
+
+.tab {
+  flex: 0 0 auto;
+  min-width: 62px;
+  max-width: 190px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px 0 9px;
+  border-radius: 7px;
+  color: var(--text-dim);
+  background: var(--tab-bg);
+  cursor: pointer;
+}
+
+.tab:hover {
+  background: var(--hover-bg);
+}
+
+.tab.active {
+  color: var(--text);
+  background: var(--tab-active-bg);
+  box-shadow: var(--shadow);
+}
+
+.tab-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12px;
+}
+
+.tab-close {
+  flex: 0 0 auto;
+  width: 17px;
+  height: 17px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+  font-size: 10px;
+  color: var(--text-dim);
+  opacity: 0;
+}
+.tab:hover .tab-close,
+.tab.active .tab-close {
+  opacity: 1;
+}
+.tab-close:hover {
+  background: var(--press-bg);
+  color: var(--text);
+}
+
+/* 加载中的小转圈 */
+.tab-spinner {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1.6px solid var(--border);
+  border-top-color: var(--accent);
+  animation: ds-spin 0.7s linear infinite;
+}
+@keyframes ds-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.tab.failed .tab-title {
+  color: #d1495b;
+}
+
+/* --------------------------- 窄窗口下的会话标题 --------------------------- */
+
+/* 宽窗口用 Tab 条，这里就藏起来；窄窗口反过来。见文件末尾的媒体查询。 */
+.title-label {
+  display: none;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  color: var(--text);
+  padding: 0 4px;
+  pointer-events: none; /* 纯展示，别抢拖拽 */
+}
+
+/* ------------------------------- 右侧动作 ------------------------------- */
+
+.spacer {
+  flex: 0 1 auto;
+  min-width: 4px;
+  height: 100%;
+}
+
+.win-controls {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: stretch;
+  height: var(--bar-height);
+  margin-left: 2px;
+}
+
+.win-btn {
+  width: var(--win-btn-width);
+  height: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.win-btn:hover {
+  background: var(--hover-bg);
+}
+.win-btn.danger:hover {
+  background: #e5484d;
+  color: #fff;
+}
+
+/* ==========================================================================
+   窄窗口（紧凑小窗口形态）：位置比功能密度更值钱，收起次要控件
+   ========================================================================== */
+
+@media (max-width: 640px) {
+  .tabstrip,
+  .nav-group,
+  .extra-only {
+    display: none;
+  }
+  .title-label {
+    display: block;
+  }
+  :root {
+    --win-btn-width: 34px;
+  }
+  .text-btn {
+    padding: 0 7px;
+  }
+}
+
+@media (max-width: 430px) {
+  .brand {
+    display: none;
+  }
+}

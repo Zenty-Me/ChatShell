@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'"
+    />
+    <title>Prompt 模板库</title>
+    <link rel="stylesheet" href="palette.css" />
+  </head>
+  <body>
+    <header class="pal-header">
+      <input id="search" class="search" type="search" placeholder="搜索 Prompt 模板…" autocomplete="off" spellcheck="false" />
+      <button id="btn-new" class="ghost" title="新建模板 (Ctrl+N)">＋ 新建</button>
+    </header>
+
+    <main class="pal-body">
+      <ul id="list" class="list"></ul>
+      <div id="empty" class="empty">还没有模板。点右上角「＋ 新建」加一条。</div>
+
+      <form id="editor" class="editor hidden">
+        <label class="field">
+          <span>标题</span>
+          <input id="edit-title" type="text" autocomplete="off" spellcheck="false" />
+        </label>
+        <label class="field grow">
+          <span>内容（发给 DeepSeek 的原文）</span>
+          <textarea id="edit-text" spellcheck="false"></textarea>
+        </label>
+        <div class="editor-actions">
+          <button type="button" id="btn-delete" class="ghost danger">删除</button>
+          <div class="grow"></div>
+          <button type="button" id="btn-cancel" class="ghost">取消</button>
+          <button type="submit" id="btn-save" class="primary">保存</button>
+        </div>
+      </form>
+    </main>
+
+    <footer class="pal-footer">
+      <span>↑↓ 选择</span><span class="dot">·</span>
+      <span>Enter 发送</span><span class="dot">·</span>
+      <span>Ctrl+Enter 只填入不发送</span><span class="dot">·</span>
+      <span>Ctrl+N 新建</span><span class="dot">·</span>
+      <span>Esc 关闭</span>
+    </footer>
+
+    <script src="palette.js"></script>
+  </body>
+</html>

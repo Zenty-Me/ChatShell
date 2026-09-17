@@ -1,0 +1,134 @@
+{
+  "version": 4,
+  "note": "DOM 选择器是最脆的部分——站点一改版就全挂。所以全部集中在这里，改这一个文件即可，不用动代码。每一项都是候选数组，按顺序尝试，命中即用；全都没命中就静默跳过，绝不影响主功能。每项还可以带 textKeywords：[选择器全落空时]按可见文本/aria-label 模糊匹配。失效时：托盘菜单 → 「选择器自检」，报告里会列出每个候选的命中数和整页 DOM 指纹。",
+  "observations": [
+    "2026-09-17 登录态下实测（480px 窄窗口，聊天页空状态，276 个元素）：",
+    "  · 输入框是 <textarea class=\"... ds-scroll-area ...\" placeholder=\"给 DeepSeek 发送消息 \">，没有 id —— #chat-input 已失效。",
+    "  · 发送按钮是纯图标按钮，aria-label 和文本都是空的 → 按文本找必然失败，所以加了「离输入框最近的按钮」这条兜底。",
+    "  · 窄窗口下站点本身就不渲染侧边栏（sidebar 组 0 命中），只有一个汉堡按钮；所以隐藏侧栏在小窗口里没有副作用、也不会留空隙，它是给展开档准备的。",
+    "  · 站点使用 ds- 前缀设计系统：ds-button / ds-button--capsule / ds-button--filled / ds-button--circle / ds-scroll-area / ds-icon。",
+    "",
+    "2026-09-17 打开真实历史会话后的结构探测（npm run probe:chat，输出见 chat-structure.txt）：",
+    "  · 一条完整消息 = div.ds-message，它有两个子元素：思考区 + 正文。",
+    "  · 正文 = div.ds-markdown.ds-assistant-message-main-content ★ 有专属类名，必须优先用它。",
+    "  · 思考过程 = div.ds-think-content（文本是推理原文，不含「已思考（用时 N 秒）」那句折叠头）。",
+    "  · 折叠头在 div._245c867 里，内容是「已思考（用时 3 秒）」—— 读思考正文时不要带上它。",
+    "  · 代码块 = div.md-code-block > div.md-code-block-banner-wrap（语言名 + 复制/下载按钮）+ pre。",
+    "  · ⚠️ 全页含 'markdown' 字样的元素有 90 个，绝大多数是碎片（md-code-block-banner-wrap 的文本只有 8 个字）。",
+    "     早期用「[class*='markdown'] 的最后一个」取回复，会取到这种碎片 —— 快捷问答面板曾因此只显示 '-' 和 '34'。",
+    "     所以：正文用严格类名优先，兜底时必须做「排除嵌套 + 排除 code-block 外壳」。",
+    "",
+    "改选择器时的安全红线：隐藏类规则必须走 data-* 开关 + :is(...) 包裹 + :not(html):not(body) 兜底，",
+    "并且选择器绝不能匹配到开关属性值本身（曾用类名 ds-hide-sidebar，[class*='sidebar'] 因此命中 <html>，把整页 display:none 成白屏）。"
+  ],
+  "groups": {
+    "composer": {
+      "desc": "对话输入框（实测是 <textarea>）。全部落空时 preload 会退化为「页面上最后一个可见的 textarea / contenteditable」，所以一般不会真的挂。",
+      "selectors": [
+        "textarea[placeholder*='发送消息']",
+        "textarea[class*='ds-scroll-area']",
+        "textarea[class*='ds-']",
+        "textarea[placeholder]",
+        "textarea#chat-input",
+        "#chat-input",
+        "div[contenteditable='true'][role='textbox']",
+        "div[contenteditable='true']",
+        "textarea"
+      ]
+    },
+    "sendButton": {
+      "desc": "发送按钮（实测是纯图标按钮，无 aria-label、无文本）。依次尝试：显式选择器 → textKeywords → aria-label 含发送 → 页面上离输入框最近的那个按钮。",
+      "textKeywords": ["发送", "Send"],
+      "selectors": [
+        "[class*='ds-button--filled'][class*='ds-button--circle']",
+        "button[class*='ds-button--circle']",
+        "[class*='ds-button--circle']",
+        "div[role='button'][aria-label*='发送']",
+        "button[aria-label*='发送']",
+        "div[role='button'][aria-label*='Send']",
+        "button[aria-label*='Send']",
+        "[class*='ds-button'][aria-label*='发送']",
+        "[class*='ds-button'][aria-label*='Send']",
+        "[class*='send'] button",
+        "button[type='submit']"
+      ]
+    },
+    "assistantMessage": {
+      "desc": "★ 助手回复的【正文】。必须优先用 .ds-assistant-message-main-content —— 它精确指向正文，不会带进思考过程和代码块外壳。兜底时才退回通用 markdown 容器，且代码里会排除「嵌套在别的 markdown 里」和「code-block 外壳」的碎片。",
+      "selectors": [
+        ".ds-assistant-message-main-content",
+        "[class*='ds-assistant-message-main-content']",
+        "[class*='assistant-message-main-content']",
+        "[class*='ds-markdown']",
+        "[class*='markdown']"
+      ]
+    },
+    "assistantTurn": {
+      "desc": "★ 一条完整的助手消息（思考 + 正文）。从正文容器向上找它、或直接按类名取，用来把「这一轮的思考和正文」圈在一起，避免跨轮次串味。",
+      "selectors": [
+        ".ds-message",
+        "[class*='ds-message']",
+        "[data-role='assistant']"
+      ]
+    },
+    "reasoning": {
+      "desc": "★ 思考过程正文（推理原文）。注意不要连折叠头「已思考（用时 N 秒）」一起读 —— 那个在旁边的兄弟节点里。全部落空时按 textKeywords 找容器。",
+      "textKeywords": ["已深度思考", "思考过程", "已思考"],
+      "selectors": [
+        ".ds-think-content",
+        "[class*='ds-think-content']",
+        "[class*='think-content']",
+        "[class*='ds-think']",
+        "[class*='reasoning']"
+      ]
+    },
+    "sidebar": {
+      "desc": "左侧会话列表。实测窄窗口（480px）下站点根本不渲染侧栏，这组 0 命中且无副作用；它是给展开档准备的。默认隐藏是为了省空间，需要时可到托盘里关掉。历史会话链接形如 a[href*='/a/chat/s/<uuid>']（展开档下实测 9 条）。",
+      "selectors": [
+        "aside",
+        "[class*='ds-sidebar']",
+        "[class*='sidebar']",
+        "[class*='Sidebar']",
+        "nav[class*='side']"
+      ]
+    },
+    "extras": {
+      "desc": "干扰元素：下载 App 入口、公告条、推广位。实测聊天页 0 命中。刻意只列明确的下载/公告特征，避免误伤正常 UI。",
+      "selectors": [
+        "a[href*='download']",
+        "[class*='ds-download']",
+        "[class*='download-app']",
+        "[class*='DownloadApp']",
+        "[class*='downloadApp']",
+        "[class*='ds-announcement']",
+        "[class*='announcement']",
+        "[class*='Announcement']"
+      ]
+    },
+    "newChat": {
+      "desc": "「新对话」入口。实测聊天页按钮全是无标签图标（新对话大概率是右上角那个 ⊕），无法靠 class 稳定定位。所以快捷面板的「新会话」不走点击，而是直接让页面回到站点首页（首页 == 新会话），最稳。",
+      "textKeywords": ["新对话", "开启新对话", "新建对话", "New chat"],
+      "selectors": [
+        "a[href='/'][class*='new']",
+        "[class*='ds-new-chat']",
+        "[class*='new-chat']",
+        "[class*='newChat']",
+        "button[aria-label*='新对话']",
+        "button[aria-label*='New chat']"
+      ]
+    },
+    "homeLink": {
+      "desc": "Logo / 首页链接，「新对话」的兜底入口。聊天页无可见链接（0 命中）。",
+      "selectors": ["[class*='ds-logo'] a", "[class*='logo'] a", "a[href='/']", "header a"]
+    },
+    "messageList": {
+      "desc": "消息列表容器。实测是 div.ds-virtual-list 里的 ds-virtual-list-visible-items —— 站点用的是虚拟列表，只渲染可见项，所以「往上翻历史」读不到全部内容。当前只读最新回复，够用。",
+      "selectors": [
+        "[class*='ds-virtual-list-visible-items']",
+        "[class*='ds-virtual-list']",
+        "[class*='ds-message']",
+        "main"
+      ]
+    }
+  }
+}

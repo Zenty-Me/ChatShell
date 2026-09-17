@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>加载失败</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+      }
+      body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
+        background: #ffffff;
+        color: #1f2328;
+      }
+      @media (prefers-color-scheme: dark) {
+        body {
+          background: #1b1c1f;
+          color: #e6e8eb;
+        }
+        .card {
+          border-color: rgba(255, 255, 255, 0.12) !important;
+          background: #24262a !important;
+        }
+        .url {
+          background: rgba(255, 255, 255, 0.06) !important;
+        }
+      }
+      .card {
+        width: min(520px, 88vw);
+        padding: 28px 30px;
+        border: 1px solid rgba(15, 23, 42, 0.1);
+        border-radius: 14px;
+        background: #fafbfc;
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 17px;
+      }
+      p {
+        margin: 0 0 14px;
+        font-size: 13px;
+        line-height: 1.6;
+        opacity: 0.72;
+      }
+      .url {
+        padding: 9px 11px;
+        border-radius: 8px;
+        background: rgba(15, 23, 42, 0.05);
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+        font-size: 12px;
+        word-break: break-all;
+        margin-bottom: 18px;
+      }
+      .row {
+        display: flex;
+        gap: 10px;
+      }
+      button {
+        padding: 8px 16px;
+        border-radius: 8px;
+        border: 1px solid rgba(15, 23, 42, 0.14);
+        background: transparent;
+        color: inherit;
+        font-size: 13px;
+        cursor: pointer;
+        font-family: inherit;
+      }
+      button.primary {
+        background: #4d6bfe;
+        border-color: #4d6bfe;
+        color: #fff;
+      }
+      button:hover {
+        filter: brightness(1.06);
+      }
+      code {
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>页面没能加载出来</h1>
+      <p>
+        多半是断网、被代理拦了，或者站点临时抖动。登录态是存在本地 partition 里的，重试不会让你重新登录。
+      </p>
+      <div class="url" id="target">—</div>
+      <div class="row">
+        <button class="primary" id="retry">重试</button>
+        <button id="reload">重载本页</button>
+      </div>
+      <p style="margin: 14px 0 0; font-size: 12px" id="detail"></p>
+    </div>
+    <script src="error.js"></script>
+  </body>
+</html>
