@@ -143,7 +143,10 @@ function queueMove(screenX, screenY) {
   if (rafId) return;
   rafId = requestAnimationFrame(() => {
     rafId = 0;
-    if (pending) window.dsChrome.dragMove(pending.screenX, pending.screenY);
+    if (pending) {
+      window.dsChrome.dragMove(pending.screenX, pending.screenY);
+      pending = null;
+    }
   });
 }
 
@@ -172,6 +175,14 @@ function endDrag(e) {
   if (!dragging) return;
   dragging = false;
   document.body.classList.remove('dragging');
+  if (rafId) {
+    cancelAnimationFrame(rafId);
+    rafId = 0;
+  }
+  if (pending) {
+    window.dsChrome.dragMove(pending.screenX, pending.screenY);
+    pending = null;
+  }
   if (e && e.pointerId !== undefined) {
     try {
       bar.releasePointerCapture(e.pointerId);

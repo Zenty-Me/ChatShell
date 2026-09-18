@@ -11,6 +11,11 @@
   </head>
   <body>
     <div class="panel">
+      <div class="dragbar" id="dragbar">
+        <span class="drag-title">快捷问答</span>
+        <button id="btn-new" class="ghost" title="开启新会话（清空上下文记忆）">新会话</button>
+      </div>
+
       <!-- 输入行：呼出即打字，Enter 发送 -->
       <div class="composer">
         <span class="spark" aria-hidden="true">✦</span>
@@ -20,12 +25,6 @@
           placeholder="问点什么…  Enter 发送 · Shift+Enter 换行"
           spellcheck="false"
         ></textarea>
-        <div class="actions">
-          <button id="btn-new" class="ghost" title="开启新会话（清空上下文记忆）">新会话</button>
-          <button id="btn-open" class="ghost" title="在完整窗口里继续（会话保留在历史里）">
-            展开
-          </button>
-        </div>
       </div>
 
       <!-- 内容区：多轮对话 -->

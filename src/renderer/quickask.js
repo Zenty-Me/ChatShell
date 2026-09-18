@@ -149,17 +149,18 @@ function updateTurnNode(node, turn, isLast) {
     node.lastA = text;
   }
   const busy = isLast && (state.phase === 'generating' || state.phase === 'sending');
-  node.a.classList.toggle('streaming', busy);
+  node.a.classList.toggle('streaming', busy && !!text);
 
   // ---- 本轮状态 ----
   node.note.textContent = turn.note || '';
+  node.note.classList.toggle('busy', busy);
   node.note.classList.toggle('error', isLast && state.phase === 'error');
   node.note.classList.toggle('hidden', !turn.note);
 }
 
 /**
  * 增量渲染：只更新变化的节点。
- * 生成中每 400ms 推一次状态，整段重建会卡到没法看。
+ * 生成中持续推送状态，整段重建会卡到没法看。
  */
 function renderTurns() {
   const turns = state.turns || [];
@@ -242,8 +243,6 @@ input.addEventListener('keydown', (e) => {
 
 input.addEventListener('input', autoGrow);
 
-$('btn-open').addEventListener('click', () => window.csQuickAsk.openFull());
-
 $('btn-new').addEventListener('click', () => {
   input.value = '';
   autoGrow();
@@ -272,11 +271,10 @@ document.addEventListener('keydown', (e) => {
 /* ------------------------------ 拖动 ------------------------------ */
 
 /**
- * 顶部输入条整条可拖，但输入框和按钮不参与 —— 拖拽区绝对不能吃掉输入框的点击，
- * 否则就是「点不进输入框」。所以这里刻意不用 -webkit-app-region: drag（它由浏览器
- * 进程命中测试，脚本没法回归），改成 JS 接管 + pointer capture。
+ * 独立顶部栏负责拖动，输入框完全不参与。这里不用 -webkit-app-region: drag，
+ * 改成 JS 接管 + pointer capture，便于端到端回归。
  */
-const bar = document.querySelector('.composer');
+const bar = $('dragbar');
 let dragging = false;
 let pending = null;
 let rafId = 0;
@@ -295,7 +293,7 @@ function queueMove(x, y) {
 
 bar.addEventListener('pointerdown', (e) => {
   if (e.button !== 0 || !e.isPrimary) return;
-  if (e.target.closest('textarea, button')) return; // 交互元素不参与拖动
+  if (e.target.closest('button')) return;
   dragging = true;
   document.body.classList.add('dragging');
   pending = null;
@@ -343,6 +341,7 @@ bar.addEventListener('pointercancel', endDrag);
 
 window.csQuickAsk.onState((next) => {
   const prev = state;
+  const shouldFollow = nearBottom();
   state = next || state;
 
   const prevLen = lastLen(prev);
@@ -355,7 +354,7 @@ window.csQuickAsk.onState((next) => {
   // 但用户正在往上翻历史时不要抢他的滚动条。
   const grew = nextCount !== prevCount;
   const gotMore = lastLen(state) !== prevLen;
-  if ((grew || (state.phase === 'generating' && gotMore)) && nearBottom()) {
+  if ((grew || (state.phase === 'generating' && gotMore)) && shouldFollow) {
     scrollToBottom();
   }
 });

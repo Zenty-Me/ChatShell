@@ -1,0 +1,47 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify tag and source
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          if ($env:GITHUB_REF_NAME -ne "v$version") {
+            throw "Tag $env:GITHUB_REF_NAME does not match package.json version v$version"
+          }
+          npm run check
+
+      - name: Build Windows packages
+        run: npm run dist
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $artifacts = Get-ChildItem release -File | Where-Object Extension -eq '.exe' | ForEach-Object FullName
+          if (-not $artifacts) { throw 'No Windows release artifacts were produced' }
+          gh release create $env:GITHUB_REF_NAME @artifacts --verify-tag --generate-notes --title "ChatShell $env:GITHUB_REF_NAME"

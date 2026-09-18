@@ -6,7 +6,7 @@ const { contextBridge, ipcRenderer } = require('electron');
  * 快捷问答面板的桥。
  *
  * 通道约定：
- *   quickask:ask / close / copy / open-full  —— 面板 → 主进程的动作
+ *   quickask:ask / close / copy              —— 面板 → 主进程的动作
  *   quickask:drag-start / drag-move / drag-end —— 拖动面板（用 send，拖动时每秒几十次）
  *   quickask:state / reset                   —— 主进程 push 下来的状态
  */
@@ -14,7 +14,6 @@ contextBridge.exposeInMainWorld('csQuickAsk', {
   ask: (text) => ipcRenderer.send('quickask:ask', { text }),
   close: () => ipcRenderer.send('quickask:close'),
   copy: () => ipcRenderer.send('quickask:copy'),
-  openFull: () => ipcRenderer.send('quickask:open-full'),
   newSession: () => ipcRenderer.send('quickask:new-session'),
 
   // 拖动：和标题栏一样由 JS 接管。不用 -webkit-app-region: drag ——

@@ -149,7 +149,7 @@ function registerIpc(ctx) {
   // 为什么不用 CSS 的 -webkit-app-region: drag：
   // 那套依赖 Electron 对 WebContentsView 的拖拽区支持，行为不好验证也不好测。
   // 这里改成显式接管：标题栏按下时记下「鼠标屏幕坐标 → 窗口左上角」的偏移，
-  // 移动时用 屏幕坐标 - 偏移 反算窗口位置。用偏移而不是增量，避免逐帧误差累积。
+  // 移动时用 屏幕坐标 - 偏移 反算窗口位置，并锁住起始尺寸。
   // 渲染层用 pointer capture，鼠标移出标题栏也不会断。
 
   let drag = null;
@@ -165,6 +165,8 @@ function registerIpc(ctx) {
       sender: event.sender,
       offsetX: Number(payload.screenX || 0) - b.x,
       offsetY: Number(payload.screenY || 0) - b.y,
+      width: b.width,
+      height: b.height,
     };
   });
 
@@ -175,7 +177,17 @@ function registerIpc(ctx) {
     const x = Math.round(Number(payload.screenX || 0) - drag.offsetX);
     const y = Math.round(Number(payload.screenY || 0) - drag.offsetY);
     try {
-      win.win.setPosition(x, y);
+      // Windows 在分数 DPI 下连续 setPosition 可能顺带重算无边框窗口尺寸。
+      // setBounds 也可能被放大 1–2 DIP，按实测误差反向校正即可收敛。
+      let width = drag.width;
+      let height = drag.height;
+      for (let i = 0; i < 3; i++) {
+        win.win.setBounds({ x, y, width, height });
+        const actual = win.win.getBounds();
+        if (actual.width === drag.width && actual.height === drag.height) break;
+        width += drag.width - actual.width;
+        height += drag.height - actual.height;
+      }
     } catch (_) {
       /* 拖太快偶尔会被系统拒绝，忽略即可 */
     }
@@ -201,12 +213,6 @@ function registerIpc(ctx) {
 
   ipcMain.on('quickask:copy', () => {
     if (ctx.quickAsk) ctx.quickAsk.copyAnswer();
-  });
-
-  // 面板上的「展开」：关掉面板，把主窗口拉出来（会话本来就在历史里）
-  ipcMain.on('quickask:open-full', () => {
-    if (ctx.quickAsk) ctx.quickAsk.close();
-    ctx.windows.focusLast();
   });
 
   // 面板上的「新会话」：清空面板的对话，并让站点页开一个新对话
@@ -261,12 +267,12 @@ function registerIpc(ctx) {
   });
 
   // 快捷问答：投递结果 / 最新回复，转给面板
-  ipcMain.on('cs:prompt-result', (_e, info = {}) => {
-    if (ctx.quickAsk) ctx.quickAsk.onPromptResult(info);
+  ipcMain.on('cs:prompt-result', (event, info = {}) => {
+    if (ctx.quickAsk && ctx.quickAsk.isWorkerSender(event.sender)) ctx.quickAsk.onPromptResult(info);
   });
 
-  ipcMain.on('cs:answer', (_e, info = {}) => {
-    if (ctx.quickAsk) ctx.quickAsk.onAnswer(info);
+  ipcMain.on('cs:answer', (event, info = {}) => {
+    if (ctx.quickAsk && ctx.quickAsk.isWorkerSender(event.sender)) ctx.quickAsk.onAnswer(info);
   });
 
   // 站点页检测到风控拦截页。记日志 + 托盘气泡提醒，避免用户以为是壳坏了

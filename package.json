@@ -4,9 +4,17 @@
   "version": "0.2.0",
   "description": "网页版 AI 的桌面外壳：快捷启动 + 可改造注入层（登录态持久化 / 托盘 / 全局热键 / 紧凑小窗 / 快捷问答）",
   "main": "src/main/index.js",
-  "author": "local",
+  "author": "zenty-me",
   "license": "MIT",
   "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zenty-me/ChatShell.git"
+  },
+  "homepage": "https://github.com/zenty-me/ChatShell#readme",
+  "bugs": {
+    "url": "https://github.com/zenty-me/ChatShell/issues"
+  },
   "scripts": {
     "start": "node scripts/launch.js",
     "dev": "node scripts/launch.js --dev",
@@ -17,11 +25,11 @@
     "check": "node scripts/syntax-check.js",
     "build:preload": "node scripts/build-preload.js",
     "icon": "node scripts/make-icon.js",
-    "pack:dir": "electron-builder --dir",
-    "dist": "electron-builder"
+    "pack:dir": "npm run build:preload && electron-builder --dir",
+    "dist": "npm run build:preload && electron-builder"
   },
   "build": {
-    "appId": "com.local.chatshell",
+    "appId": "com.github.zenty-me.chatshell",
     "productName": "ChatShell",
     "directories": {
       "output": "release",
@@ -38,16 +46,19 @@
         "nsis",
         "portable"
       ],
-      "icon": "build/icon.png",
-      "artifactName": "${productName}-${version}-${arch}.${ext}"
+      "icon": "build/icon.png"
     },
     "nsis": {
+      "artifactName": "${productName}-${version}-${arch}-Setup.${ext}",
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "ChatShell"
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-${arch}-Portable.${ext}"
     },
     "mac": {
       "target": [

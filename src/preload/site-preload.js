@@ -381,6 +381,22 @@ turndown.addRule('skip-site-noise', {
   replacement: () => '',
 });
 
+// 正文兜底有时会命中包住「思考 + 正文」的外层容器。
+// 无论命中哪一层，思考节点都只能进入 reasoning 字段，不能再混进正文。
+turndown.addRule('skip-reasoning', {
+  filter: (node) => {
+    if (node.nodeType !== 1) return false;
+    return selectorList('reasoning').some((sel) => {
+      try {
+        return node.matches(sel);
+      } catch (_) {
+        return false;
+      }
+    });
+  },
+  replacement: () => '',
+});
+
 // 代码块：站点的语言名不在 <code class="language-x"> 里，而是放在顶栏 —— 单独捞一下
 turndown.addRule('fenced-code-with-lang', {
   filter: (node) => node.nodeName === 'PRE',
@@ -431,39 +447,60 @@ function htmlToMarkdown(root) {
  * 绝大多数是碎片（代码块外壳 md-code-block-banner-wrap 的文本只有 8 个字「bash复制下载」）。
  * 早期就是这么写的，结果面板上只显示出 `-` 和 `34`。
  */
-function resolveLatestContent() {
+function isInsideReasoning(el) {
+  return selectorList('reasoning').some((sel) => {
+    try {
+      return !!el.closest(sel);
+    } catch (_) {
+      return false;
+    }
+  });
+}
+
+function resolveContentIn(root = document) {
   const input = resolveInput();
-  const hits = pickAll('assistantMessage').filter(
-    (el) => !isOurs(el) && !(input && el.contains(input))
-  );
-  if (!hits.length) return null;
-  // 命中的可能混进代码块外壳（兜底候选里含通用 markdown），先剔掉
-  const clean = hits.filter((el) => !/code-block/i.test(String(el.className)));
-  const list = clean.length ? clean : hits;
-  return list[list.length - 1];
+  for (const sel of selectorList('assistantMessage')) {
+    try {
+      const hits = Array.from(root.querySelectorAll(sel)).filter(
+        (el) =>
+          !isOurs(el) &&
+          !(input && el.contains(input)) &&
+          !/code-block/i.test(String(el.className)) &&
+          !isInsideReasoning(el)
+      );
+      if (hits.length) return hits[hits.length - 1];
+    } catch (_) {
+      /* ignore */
+    }
+  }
+  return null;
+}
+
+function resolveLatestContent() {
+  return resolveContentIn(document);
+}
+
+function resolveLatestAssistantTurn() {
+  const hits = pickAll('assistantTurn').filter((el) => !isOurs(el));
+  return hits.length ? hits[hits.length - 1] : null;
+}
+
+function resolveLatestReasoning() {
+  const hits = pickAll('reasoning').filter((el) => !isOurs(el));
+  return hits.length ? hits[hits.length - 1] : null;
 }
 
 /**
  * 通用兜底：最外层的 markdown 容器（排除嵌套碎片、代码块外壳、思考过程内部的）。
  * 只在严格类名全落空时才走这里。
  */
-function fallbackOutermostMarkdown() {
+function fallbackOutermostMarkdown(root = document) {
   const input = resolveInput();
-  const reasonSels = selectorList('reasoning');
-  const inReasoning = (el) =>
-    reasonSels.some((s) => {
-      try {
-        return !!el.closest(s);
-      } catch (_) {
-        return false;
-      }
-    });
-
-  const all = Array.from(document.querySelectorAll('[class*="markdown"]'))
+  const all = Array.from(root.querySelectorAll('[class*="markdown"]'))
     .filter((el) => !isOurs(el))
     .filter((el) => !/code-block/i.test(String(el.className)))
     .filter((el) => !(input && el.contains(input)))
-    .filter((el) => !inReasoning(el))
+    .filter((el) => !isInsideReasoning(el))
     .filter((el) => isVisible(el) && String(el.textContent || '').trim().length > 20);
   if (!all.length) return null;
 
@@ -508,12 +545,16 @@ function turnOf(contentEl) {
  * 「已思考（用时 N 秒）」那句折叠头一起带进来。
  */
 function readLatestTurn() {
-  let contentEl = resolveLatestContent();
-  if (!contentEl) contentEl = fallbackOutermostMarkdown();
-  if (!contentEl) return null;
-
-  const reasoningEl = pickReasoningIn(turnOf(contentEl));
-  const content = htmlToMarkdown(contentEl);
+  const latestTurn = resolveLatestAssistantTurn();
+  let contentEl = latestTurn ? resolveContentIn(latestTurn) : resolveLatestContent();
+  if (!contentEl) contentEl = fallbackOutermostMarkdown(latestTurn || document);
+  let turnElement = latestTurn || turnOf(contentEl);
+  let reasoningEl = pickReasoningIn(turnElement);
+  if (!contentEl && !reasoningEl) {
+    reasoningEl = resolveLatestReasoning();
+    if (reasoningEl) turnElement = turnOf(reasoningEl) || reasoningEl;
+  }
+  const content = contentEl ? htmlToMarkdown(contentEl) : '';
 
   let reasoning = '';
   if (reasoningEl && reasoningEl !== contentEl) {
@@ -527,6 +568,7 @@ function readLatestTurn() {
   return {
     content,
     reasoning,
+    turnElement,
     // 流式输出时两者都在变，长度 + 尾部片段一起当指纹
     key: `${content.length}:${content.slice(-24)}|R${reasoning.length}:${reasoning.slice(-24)}`,
   };
@@ -551,7 +593,8 @@ function stopAnswerWatch() {
 /**
  * 开始盯着最新回复。
  *
- * 原理：记住「当前最后一条回复」当作基线，之后出现不同的内容就是新答案。
+ * 原理：记住「当前最后一轮回复」当作基线，新轮次一出现就开始推送思考内容，
+ * 不再等正文容器出现。
  * 结束判定不看站点的 DOM 状态（那是脆的），而是看**文本是否停止变化**——
  * 1.5 秒内没变化就认为生成完了。这个判据跟站点改版无关，最稳。
  */
@@ -560,6 +603,7 @@ function startAnswerWatch() {
   const baseline = readAnswerSnapshot();
   answerWatch = {
     baselineKey: baseline ? baseline.key : '',
+    baselineTurn: baseline ? baseline.turnElement : null,
     lastKey: '',
     lastChangeAt: Date.now(),
     gotSomething: false,
@@ -571,6 +615,7 @@ function startAnswerWatch() {
     ipcRenderer.send('cs:answer', {
       content: snap ? snap.content : '',
       reasoning: snap ? snap.reasoning : '',
+      gotSomething: !!(answerWatch && answerWatch.gotSomething),
       done,
       ...(extra || {}),
     });
@@ -584,7 +629,10 @@ function startAnswerWatch() {
 
       // 还没等到新答案（还是基线那条）
       if (!answerWatch.gotSomething) {
-        if (snap.key === answerWatch.baselineKey) return;
+        const isBaseline = answerWatch.baselineTurn
+          ? snap.turnElement === answerWatch.baselineTurn
+          : snap.key === answerWatch.baselineKey;
+        if (isBaseline) return;
         answerWatch.gotSomething = true;
         answerWatch.lastKey = snap.key;
         answerWatch.lastChangeAt = Date.now();
@@ -609,7 +657,7 @@ function startAnswerWatch() {
     } catch (err) {
       debug(`监听回复出错(已忽略): ${err.message}`);
     }
-  }, 400);
+  }, 200);
 
   // 总超时兜底，别让面板永远转圈
   answerWatch.timeoutTimer = setTimeout(() => {

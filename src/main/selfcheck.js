@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { screen } = require('electron');
 const { PATHS } = require('./paths');
 const { log } = require('./log');
 const injection = require('./injection');
@@ -182,7 +183,6 @@ async function run(ctx) {
     log.error('自检失败：没有可用的会话标签');
     return ctx.windows.quit();
   }
-
   const wc = tab.view.webContents;
   const why = await waitForLoad(wc);
   log.info(`自检：HTML 加载状态 = ${why}`);
@@ -255,11 +255,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /**
  * 快捷问答面板的端到端实测（npm run test:ask）。
  *
- * 会真的往当前会话发一个问题 —— 因为「填输入框 → 点发送 → 盯住新回复 → 回传面板」
+ * 会真的连续发两个相同问题 —— 因为「填输入框 → 点发送 → 盯住新回复 → 回传面板」
  * 这条链路没法靠静态检查覆盖，断了就只能等用户反馈。
- * 问题刻意选得极简，方便你在历史里一眼认出来并删掉。
+ * 问题要求先思考再分点回答，用来观察“思考先于正文”的流式阶段。
  */
-const TEST_QUESTION = '只回复两个字：收到';
+const TEST_QUESTION = '请先思考，再用三点简述 JavaScript 事件循环，每点一句。';
 
 async function runAskTest(ctx) {
   const win = ctx.windows.target();
@@ -272,6 +272,8 @@ async function runAskTest(ctx) {
     log.error('问答测试失败：没有活动会话');
     return ctx.windows.quit();
   }
+  const initialTabIds = win.tabs.map((item) => item.id).join(',');
+  const initialTabUrl = tab.url;
 
   const ready = await waitForAppReady(tab.view.webContents, 40000);
   log.info(`问答测试：页面就绪状态 = ${ready.reason}（元素 ${ready.total}，输入框=${ready.hasComposer}）`);
@@ -284,20 +286,31 @@ async function runAskTest(ctx) {
   await sleep(900);
   await captureShots(win, 'quickask-open', ctx);
 
-  log.info(`问答测试：发送「${TEST_QUESTION}」…`);
-  ctx.quickAsk.ask(TEST_QUESTION);
-
   const started = Date.now();
   const phases = [];
-  let lastPhase = '';
-  while (Date.now() - started < 90000) {
-    const st = ctx.quickAsk.state;
-    if (st.phase !== lastPhase) {
-      lastPhase = st.phase;
-      phases.push(`${st.phase}@${Math.round((Date.now() - started) / 100) / 10}s`);
+  const reasoningStreamed = [];
+  for (let round = 1; round <= 2; round++) {
+    log.info(`问答测试：第 ${round} 轮发送「${TEST_QUESTION}」…`);
+    await ctx.quickAsk.ask(TEST_QUESTION);
+
+    const roundStarted = Date.now();
+    let lastPhase = '';
+    const reasoningLengths = new Set();
+    while (Date.now() - roundStarted < 130000) {
+      const current = ctx.quickAsk.state;
+      const currentTurn = current.turns && current.turns[current.turns.length - 1];
+      if (current.phase === 'generating' && currentTurn && currentTurn.reasoning) {
+        reasoningLengths.add(currentTurn.reasoning.length);
+      }
+      if (current.phase !== lastPhase) {
+        lastPhase = current.phase;
+        phases.push(`${round}:${current.phase}@${Math.round((Date.now() - started) / 100) / 10}s`);
+      }
+      if (current.phase === 'done' || current.phase === 'error') break;
+      await sleep(100);
     }
-    if (st.phase === 'done' || st.phase === 'error') break;
-    await sleep(400);
+    reasoningStreamed.push(reasoningLengths.size >= 2);
+    if (ctx.quickAsk.state.phase !== 'done') break;
   }
 
   const st = ctx.quickAsk.state;
@@ -305,11 +318,34 @@ async function runAskTest(ctx) {
   const last = turns.length ? turns[turns.length - 1] : null;
   const answer = last ? last.a || '' : '';
   const reasoning = last ? last.reasoning || '' : '';
+  const separated = !reasoning || !answer.includes(reasoning);
   log.info(
     `问答测试结果: phase=${st.phase} 耗时=${((Date.now() - started) / 1000).toFixed(1)}s ` +
       `轮数=${turns.length} 正文=${answer.length}字 思考=${reasoning.length}字 note=${st.note || '-'}`
   );
+  if (st.phase === 'done' && turns.length !== 2) {
+    log.warn(`问答测试失败：期望完成 2 轮，实际 ${turns.length} 轮`);
+  }
   log.info(`阶段变化: ${phases.join(' → ')}`);
+  log.info(`思考过程观察到多个增量: ${reasoningStreamed.join(' / ') || '未观察到'}`);
+  log.info(`思考与正文分离 = ${separated}`);
+  if (!separated) log.warn('问答测试失败：完整思考内容混进了正文');
+  const worker = ctx.quickAsk.worker;
+  let workerVisibility = 'missing';
+  let workerOutside = false;
+  if (worker && !worker.isDestroyed()) {
+    workerVisibility = await worker.webContents.executeJavaScript('document.visibilityState', true);
+    const b = worker.getBounds();
+    workerOutside = screen.getAllDisplays().every((display) => {
+      const d = display.bounds;
+      return b.x + b.width <= d.x || b.x >= d.x + d.width || b.y + b.height <= d.y || b.y >= d.y + d.height;
+    });
+  }
+  const isolated = !!worker && workerVisibility === 'visible' && workerOutside && !worker.isFocused() &&
+    win.getActiveTab() === tab && tab.url === initialTabUrl && win.tabs.map((item) => item.id).join(',') === initialTabIds;
+  log.info(`快捷问答与主面板隔离 = ${isolated}`);
+  log.info(`后台页 visibility=${workerVisibility} 屏幕外=${workerOutside} 获取焦点=${worker ? worker.isFocused() : false}`);
+  if (!isolated) log.warn('问答测试失败：快捷问答隐藏会话影响了主面板');
   if (answer) {
     log.info(`回答内容(前 200 字): ${String(answer).slice(0, 200).replace(/\s+/g, ' ')}`);
   }
@@ -433,6 +469,35 @@ async function verifyQuickAskPanel(ctx, win) {
        比真发消息好：不污染会话历史，还能精确控制「有思考 / 无思考」两种形态。 */
     const savedState = JSON.parse(JSON.stringify(ctx.quickAsk.state));
     ctx.quickAsk.setState({
+      phase: 'generating',
+      note: '正在思考…',
+      turns: [{ q: '流式测试', a: '', reasoning: '先分析问题，再组织答案', note: '正在思考…' }],
+    });
+    await sleep(250);
+    const streaming = await panel.webContents.executeJavaScript(
+      `(() => {
+        const turn = document.querySelector('.turn');
+        const think = turn && turn.querySelector('.think');
+        const note = turn && turn.querySelector('.turn-note');
+        return {
+          thinkVisible: !!(think && !think.hidden),
+          thinkOpen: !!(think && think.open),
+          reasoning: think ? think.querySelector('.think-body').textContent : '',
+          busy: !!(note && note.classList.contains('busy')),
+          status: note ? note.textContent : '',
+        };
+      })()`,
+      true
+    );
+    results.push(
+      `流式思考: 可见=${streaming.thinkVisible} 展开=${streaming.thinkOpen} ` +
+        `状态=${streaming.status} 动态标记=${streaming.busy}`
+    );
+    if (!streaming.thinkVisible || !streaming.thinkOpen || !streaming.reasoning || !streaming.busy) {
+      log.warn('快捷问答自检：思考过程没有在正文出现前进入流式生成态');
+    }
+
+    ctx.quickAsk.setState({
       phase: 'done',
       note: '',
       turns: [
@@ -453,6 +518,7 @@ async function verifyQuickAskPanel(ctx, win) {
           t0ThinkVisible: !!(think0 && !think0.hidden),
           t0ThinkOpen: !!(think0 && think0.open),
           t0ThinkText: t0 && t0.querySelector('.think-body') ? t0.querySelector('.think-body').textContent.slice(0, 8) : '',
+          t0AnswerText: t0 && t0.querySelector('.a') ? t0.querySelector('.a').textContent : '',
           t0Bold: !!(t0 && t0.querySelector('.a strong')),
           t0Q: t0 ? (t0.querySelector('.q').textContent || '') : '',
           t1ThinkVisible: !!(t1 && t1.querySelector('.think') && !t1.querySelector('.think').hidden),
@@ -472,6 +538,31 @@ async function verifyQuickAskPanel(ctx, win) {
     if (!dom.t0ThinkVisible || dom.t0ThinkOpen) {
       log.warn('快捷问答自检：思考过程没有正确折叠（有正文时应自动收起）');
     }
+    if (dom.t0AnswerText.includes('思考过程原文')) {
+      log.warn('快捷问答自检：思考内容混进了正文区域');
+    }
+
+    // 长回答必须留在固定高度的内容容器里滚动，不能把窗口越撑越大。
+    ctx.quickAsk.setState({
+      phase: 'done',
+      note: '',
+      turns: [{ q: '长回答滚动测试', a: Array.from({ length: 80 }, (_, i) => `${i + 1}. 测试内容`).join('\n'), reasoning: '', note: '' }],
+    });
+    await sleep(300);
+    const scroll = await panel.webContents.executeJavaScript(
+      `(() => {
+        const el = document.getElementById('content');
+        const scrollable = el.scrollHeight > el.clientHeight;
+        el.scrollTop = Math.max(1, Math.floor((el.scrollHeight - el.clientHeight) / 2));
+        return { scrollable, moved: el.scrollTop > 0, clientHeight: el.clientHeight, scrollHeight: el.scrollHeight };
+      })()`,
+      true
+    );
+    results.push(
+      `长回答滚动: 可滚动=${scroll.scrollable} 已移动=${scroll.moved} ` +
+        `高度=${scroll.clientHeight}/${scroll.scrollHeight}`
+    );
+    if (!scroll.scrollable || !scroll.moved) log.warn('快捷问答自检：长回答内容区无法滚动');
 
     // 趁这份样例数据还在，截一张 —— 它就是「多轮 + 思考折叠 + Markdown」的真实渲染效果，
     // 排查「渲染不对」时比对着描述猜快得多。
@@ -482,7 +573,7 @@ async function verifyQuickAskPanel(ctx, win) {
     ctx.quickAsk.push();
     await sleep(250);
 
-    // 拖动面板：合成 PointerEvent 端到端跑一遍（渲染层 → IPC → setPosition）。
+    // 拖动面板：合成 PointerEvent 端到端跑一遍（渲染层 → IPC → setBounds）。
     // 这类靠鼠标才能触发的功能人工很难回归，坏掉也只能等用户说「拖不动」。
     const send = (js) => panel.webContents.executeJavaScript(js, true);
     const mkPointerFn = (id) =>
@@ -496,24 +587,27 @@ async function verifyQuickAskPanel(ctx, win) {
     const py = beforeDrag.y + 20;
     const P = mkPointerFn(1);
     await send(
-      '(function(){' + P + 'document.querySelector(".composer")' +
+      '(function(){' + P + 'document.getElementById("dragbar")' +
         '.dispatchEvent(mk("pointerdown",' + px + ',' + py + '));return 1;})()'
     );
     await sleep(90);
     await send(
-      '(function(){' + P + 'document.querySelector(".composer")' +
+      '(function(){' + P + 'document.getElementById("dragbar")' +
         '.dispatchEvent(mk("pointermove",' + (px + 60) + ',' + (py + 40) + '));return 1;})()'
     );
     await sleep(90);
     await send(
-      '(function(){' + P + 'document.querySelector(".composer")' +
+      '(function(){' + P + 'document.getElementById("dragbar")' +
         '.dispatchEvent(mk("pointerup",' + (px + 60) + ',' + (py + 40) + '));return 1;})()'
     );
     await sleep(420);
     const afterDrag = panel.getBounds();
     const dx = afterDrag.x - beforeDrag.x;
     const dy = afterDrag.y - beforeDrag.y;
-    results.push(`拖动面板 位移(${dx},${dy}) 期望(60,40) = ${dx === 60 && dy === 40}`);
+    const sizeStable = afterDrag.width === beforeDrag.width && afterDrag.height === beforeDrag.height;
+    results.push(
+      `拖动面板 位移(${dx},${dy}) 期望(60,40)=${dx === 60 && dy === 40} 尺寸不变=${sizeStable}`
+    );
 
     // 反过来也要成立：从输入框上拖动绝不能挪窗口。
     // 拖拽区一旦吃掉输入框的指针事件，表现就是「点不进输入框」。
@@ -610,8 +704,10 @@ async function verifyWindowInteractions(ctx, win) {
     const after = win.win.getBounds();
     const dx = after.x - before.x;
     const dy = after.y - before.y;
+    const sizeStable = after.width === before.width && after.height === before.height;
     results.push(
-      `拖拽 位移(${dx},${dy}) 期望(${DX},${DY}) ${dx === DX && dy === DY ? '✅' : '❌'}`
+      `拖拽 位移(${dx},${dy}) 期望(${DX},${DY}) ${dx === DX && dy === DY ? '✅' : '❌'} ` +
+        `尺寸不变=${sizeStable ? '✅' : '❌'}`
     );
     // 复位，别把用户窗口挪走
     win.win.setBounds(before);

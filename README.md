@@ -1,5 +1,9 @@
 # ChatShell
 
+[![Release](https://github.com/zenty-me/ChatShell/actions/workflows/release.yml/badge.svg)](https://github.com/zenty-me/ChatShell/actions/workflows/release.yml)
+[![GitHub release](https://img.shields.io/github/v/release/zenty-me/ChatShell)](https://github.com/zenty-me/ChatShell/releases)
+[![License](https://img.shields.io/github/license/zenty-me/ChatShell)](LICENSE)
+
 **网页版 AI 的桌面外壳。** 当前适配 DeepSeek（chat.deepseek.com），架构上不绑定任何一家 —— 换站只改三行配置 + 一份选择器。
 
 名字取「壳」的意思：它**不是**另一个 AI 客户端，而是在官方网页外面加一层壳。
@@ -177,7 +181,9 @@ npm run verify:login
 
 ```
 ┌──────────────────────────────────────────────────┐
-│ ✦  问点什么… Enter 发送 · Shift+Enter 换行  新会话 展开│
+│ 快捷问答                                      新会话│  ← 按住此栏拖动
+├──────────────────────────────────────────────────┤
+│ ✦  问点什么… Enter 发送 · Shift+Enter 换行          │
 ├──────────────────────────────────────────────────┤
 │ 给我讲讲事件循环                                   │  ← 你的问题
 │                                                   │
@@ -199,19 +205,16 @@ npm run verify:login
 ```
 
 - **Markdown 渲染**：标题、列表、表格、引用、行内码、代码块（带语言角标）按格式显示。
-  渲染器是零依赖的 `src/renderer/md.js`（约 200 行）—— 面板的 CSP 是 `script-src 'self'`
-  引不了 CDN，而内容来自外部，所以流程是「**先整体转义，再按白名单加标签**」，
-  任何原始 HTML 都会被转义（自检里有一条专门的 XSS 转义断言）。
-- **思考过程单独渲染 + 可折叠**：读的是站点的 `.ds-think-content`（推理原文，不含「已思考（用时 N 秒）」那句折叠头），
-  视觉上和正文刻意拉开距离。生成中自动展开让你看到进度，正文一出来自动收起；
+  使用本地依赖 `marked` 解析，再由 `DOMPurify` 消毒；不加载 CDN，也不执行回复中的 HTML。
+- **思考过程实时渲染 + 可折叠**：读的是站点的 `.ds-think-content`（推理原文，不含「已思考（用时 N 秒）」那句折叠头），
+  正文尚未出现时也会持续刷新。生成中自动展开让你看到进度，正文一出来自动收起；
   **你手动开合过之后就不再自动动它**（免得你正读着被折叠）。
-- **多轮对话 + 独立会话**：面板会**自己新开一个会话标签**，不占用你正在聊的那个
-  —— 否则面板的问题会插进你的对话里。多轮之间有上下文记忆；关掉面板再打开对话还在；
+- **多轮对话 + 独立后台会话**：面板使用一个不进入任务栏、不获取焦点的后台网页窗口，
+  主面板不会创建标签，当前页面和焦点完全不变。多轮之间有上下文记忆；关掉面板再打开对话还在；
   想重开就点「新会话」。这个会话一直保留到退出应用，内容同时落在 DeepSeek 历史里随时能找回来。
 - 居屏幕偏上、水平对齐主窗口中心呼出；无边框、圆角、置顶；`Enter` 发送，`Shift+Enter` 换行，`Esc` 关闭
-- **按住顶部输入条可拖动面板**（在输入框或按钮上按下不会误触发拖动）
+- **按住独立顶部栏可拖动面板**；输入框只负责输入，不再兼任拖动区域
 - 焦点不在输入框时按 **`C`** 复制答案（复制的是 **Markdown**）
-- 「展开」按钮关掉面板并把主窗口拉出来 —— 会话就在那个标签里，可以直接接着聊
 - **面板永远是主窗口的 owned window**（创建时挂 `parent`）。主窗口和面板都是置顶窗口、位置又高度重叠，
   如果靠「谁最后激活谁在上层」抢层级，就会出现「点面板实际点到主窗口，主窗口抢走焦点后把面板 blur 关掉」——
   看起来就是面板完全点不动。owned window 由系统保证绘制在 owner 之上，从根上避免这个竞争。
@@ -549,6 +552,58 @@ npm run pack:dir  # 只出目录，方便快速验证
 ```
 
 Windows 出 NSIS 安装包 + 免安装 portable 版，macOS 出 dmg，Linux 出 AppImage。
+
+Windows 产物分别命名为：
+
+- `ChatShell-<版本>-<架构>-Setup.exe`
+- `ChatShell-<版本>-<架构>-Portable.exe`
+
+## 上传 GitHub 与发布版本
+
+### 第一次上传
+
+1. 在 GitHub 新建名为 `ChatShell` 的**空仓库**，不要勾选 README、`.gitignore` 或 License。
+2. 在项目目录执行：
+
+```powershell
+git add .
+git commit -m "release: prepare v0.2.0"
+git remote add origin https://github.com/zenty-me/ChatShell.git
+git push -u origin main
+```
+
+如果 GitHub 要求登录，按 Git Credential Manager 弹出的浏览器提示授权即可。
+
+### 发布 v0.2.0
+
+源码推送成功后执行：
+
+```powershell
+git tag -a v0.2.0 -m "ChatShell v0.2.0"
+git push origin v0.2.0
+```
+
+推送 `v*` 标签会触发 `.github/workflows/release.yml`：检查标签与 `package.json` 版本是否一致，安装依赖，运行静态检查，构建 Windows 安装版和便携版，最后自动创建 GitHub Release 并上传两个 `.exe`。
+
+可在仓库的 **Actions** 页面查看构建进度，在 **Releases** 页面下载安装包。
+
+### 发布后续版本
+
+以补丁版本 `0.2.1` 为例：
+
+```powershell
+npm version patch --no-git-tag-version
+# 把 CHANGELOG.md 的“未发布”内容整理到 0.2.1 小节
+npm run check
+npm run dist
+git add package.json package-lock.json CHANGELOG.md
+git commit -m "release: v0.2.1"
+git tag -a v0.2.1 -m "ChatShell v0.2.1"
+git push origin main
+git push origin v0.2.1
+```
+
+功能向后兼容用 `npm version minor --no-git-tag-version`；不兼容改动用 `major`。不要重复使用已经发布过的标签。
 
 ---
 

@@ -43,13 +43,12 @@ const uaModeFlag = (argv.find((a) => a.startsWith('--user-agent-mode=')) || '').
 
 if (!app.requestSingleInstanceLock()) {
   // 单实例锁：第二次双击图标不是再开一个进程，而是把已有窗口拉出来
-  if (isSelfCheck || isChatProbe) {
+  if (isSelfCheck || isAskTest || isChatProbe) {
     // 诊断命令被已有实例吞掉是最令人困惑的情况（明明跑了却什么都没输出），
     // 所以这里明确报错并给不同退出码，而不是静默变成「把窗口拉出来」。
     log.warn('诊断命令被取消：已有一个实例在运行。请先从托盘菜单退出，或直接用托盘里的「选择器自检」。');
-    process.exitCode = 2;
-  }
-  app.quit();
+    app.exit(2);
+  } else app.quit();
 } else {
   bootstrap();
 }

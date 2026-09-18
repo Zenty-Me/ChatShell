@@ -4,30 +4,26 @@ const path = require('path');
 const { BrowserWindow, screen, clipboard } = require('electron');
 const { PATHS } = require('./paths');
 const { log } = require('./log');
+const injection = require('./injection');
+const uaPolicy = require('./useragent');
 
 const PANEL_WIDTH = 720;
 const PANEL_HEIGHT = 480;
+const WORKER_WIDTH = 900;
+const WORKER_HEIGHT = 700;
 
-/**
- * 等标签页加载完。
- *
- * 新建标签后立刻投递消息会**静默丢失** —— 那时 preload 还没挂上 IPC 监听。
- * 所以先等 did-finish-load，再多给 800ms 让 SPA 把输入框渲染出来
- * （站点页的 applyPrompt 还会自己重试，这里是第一道保险）。
- */
-function waitForTabLoad(tab, timeoutMs = 20000) {
+function waitForLoad(webContents, timeoutMs = 20000) {
   return new Promise((resolve) => {
     let done = false;
     const finish = () => {
       if (done) return;
       done = true;
-      resolve(true);
+      setTimeout(resolve, 800);
     };
     try {
-      const wc = tab.view.webContents;
-      if (!wc.isLoading()) return finish();
-      wc.once('did-finish-load', () => setTimeout(finish, 800));
-      wc.once('did-fail-load', finish);
+      if (!webContents.isLoading()) return finish();
+      webContents.once('did-finish-load', finish);
+      webContents.once('did-fail-load', finish);
     } catch (_) {
       return finish();
     }
@@ -52,8 +48,12 @@ class QuickAskWindow {
   constructor(ctx) {
     this.ctx = ctx;
     this.win = null;
-    // 面板专属的会话标签（不占用用户正在看的那个会话）
-    this.ownTab = null;
+    this.worker = null;
+    this._workerReady = null;
+    this._reparkWorker = () => this.parkWorker();
+    screen.on('display-added', this._reparkWorker);
+    screen.on('display-removed', this._reparkWorker);
+    screen.on('display-metrics-changed', this._reparkWorker);
     /**
      * 多轮对话状态。
      *
@@ -176,6 +176,8 @@ class QuickAskWindow {
       this._drag = {
         offsetX: Number(screenX || 0) - b.x,
         offsetY: Number(screenY || 0) - b.y,
+        width: b.width,
+        height: b.height,
       };
     } catch (_) {
       this._drag = null;
@@ -187,7 +189,15 @@ class QuickAskWindow {
     const x = Math.round(Number(screenX || 0) - this._drag.offsetX);
     const y = Math.round(Number(screenY || 0) - this._drag.offsetY);
     try {
-      this.win.setPosition(x, y);
+      let width = this._drag.width;
+      let height = this._drag.height;
+      for (let i = 0; i < 3; i++) {
+        this.win.setBounds({ x, y, width, height });
+        const actual = this.win.getBounds();
+        if (actual.width === this._drag.width && actual.height === this._drag.height) break;
+        width += this._drag.width - actual.width;
+        height += this._drag.height - actual.height;
+      }
     } catch (_) {
       /* 拖太快偶尔会被系统拒绝，忽略即可 */
     }
@@ -294,51 +304,103 @@ class QuickAskWindow {
 
   /* --------------------------- 面板专属会话 --------------------------- */
 
-  /**
-   * 保证面板有一个属于自己的会话标签。
-   *
-   * 为什么不能直接用当前活动标签：那会把面板的问题插进用户正在聊的对话里，
-   * 上下文和历史都串味。面板必须有自己的一个会话。
-   *
-   * 复用规则：同一个标签一直用到应用退出 —— 这样多轮对话才有上下文记忆。
-   */
-  ensureOwnTab() {
-    const win = this.ctx.windows.target() || this.ctx.windows.create();
-    if (!win) return null;
-
-    // 还活着就复用（用户手动关掉那个标签后会自动重建）
-    if (this.ownTab) {
-      try {
-        const alive = !this.ownTab.view.webContents.isDestroyed();
-        const stillThere = win.allTabs().some((t) => t.id === this.ownTab.id);
-        if (alive && stillThere) return this.ownTab;
-      } catch (_) {
-        /* ignore */
-      }
-      this.ownTab = null;
-    }
-
-    const home = (this.ctx.config.get('site') || {}).home || 'https://chat.deepseek.com/';
-    let tab = null;
-    try {
-      tab = win.createTab(home, { activate: true });
-    } catch (err) {
-      log.warn(`创建面板会话失败: ${err.message}`);
-      return null;
-    }
-    if (tab) tab.quickAskOwned = true;
-    this.ownTab = tab;
-    log.info('快捷问答：已新建专用会话标签');
-    return tab;
+  workerBounds() {
+    const displays = screen.getAllDisplays();
+    const left = displays.length ? Math.min(...displays.map((d) => d.bounds.x)) : 0;
+    const top = displays.length ? Math.min(...displays.map((d) => d.bounds.y)) : 0;
+    return { x: left - WORKER_WIDTH - 80, y: top, width: WORKER_WIDTH, height: WORKER_HEIGHT };
   }
 
-  /** 开新会话：清空上下文（复用同一个标签，只是让它回到首页） */
-  newSession() {
-    const tab = this.ensureOwnTab();
-    const win = this.ctx.windows.target();
-    if (!tab || !win) return false;
+  parkWorker() {
+    if (!this.worker || this.worker.isDestroyed()) return;
+    const wanted = this.workerBounds();
+    const current = this.worker.getBounds();
+    if (
+      current.x !== wanted.x ||
+      current.y !== wanted.y ||
+      current.width !== wanted.width ||
+      current.height !== wanted.height
+    ) {
+      this.worker.setBounds(wanted);
+    }
+  }
+
+  async ensureWorker() {
+    if (this.worker && !this.worker.isDestroyed() && !this.worker.webContents.isDestroyed()) {
+      return this.worker.webContents;
+    }
+    if (this._workerReady) return this._workerReady;
+
+    this._workerReady = this.createWorker().finally(() => {
+      this._workerReady = null;
+    });
+    return this._workerReady;
+  }
+
+  async createWorker() {
+    const site = this.ctx.config.get('site') || {};
+    const bounds = this.workerBounds();
+    const worker = new BrowserWindow({
+      ...bounds,
+      show: false,
+      frame: false,
+      focusable: false,
+      skipTaskbar: true,
+      webPreferences: {
+        partition: site.partition,
+        preload: path.join(PATHS.dist, 'preload', 'site-preload.js'),
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        spellcheck: false,
+        backgroundThrottling: false,
+        zoomFactor: Number(this.ctx.config.get('zoomFactor')) || 1,
+      },
+    });
+    this.worker = worker;
+
+    const ua = uaPolicy.resolveUserAgent(this.ctx.config);
+    if (ua) worker.webContents.setUserAgent(ua);
+
+    worker.webContents.on('did-finish-load', () => injection.applyTo(worker.webContents, this.ctx.config));
+    worker.webContents.on('render-process-gone', (_event, details) => {
+      log.warn(`快捷问答后台页异常退出: ${details.reason}`);
+      if (this.worker === worker) this.worker = null;
+      this.setState({ phase: 'error', note: '后台会话已重置，请重新提问' });
+      setImmediate(() => {
+        if (!worker.isDestroyed()) worker.destroy();
+      });
+    });
+    worker.on('move', () => setImmediate(() => this.parkWorker()));
+    worker.on('closed', () => {
+      if (this.worker === worker) this.worker = null;
+    });
+
+    const home = (this.ctx.config.get('site') || {}).home || 'https://chat.deepseek.com/';
     try {
-      win.sendToTab(tab, 'cs:new-chat', {});
+      worker.loadURL(home).catch((err) => log.warn(`快捷问答后台页加载失败: ${err.message}`));
+      worker.showInactive();
+      this.parkWorker();
+      await waitForLoad(worker.webContents);
+    } catch (err) {
+      log.warn(`创建快捷问答后台页失败: ${err.message}`);
+      if (!worker.isDestroyed()) worker.destroy();
+      return null;
+    }
+    log.info('快捷问答：已创建独立后台会话');
+    return worker.webContents;
+  }
+
+  isWorkerSender(sender) {
+    return !!this.worker && !this.worker.isDestroyed() && this.worker.webContents === sender;
+  }
+
+  /** 开新会话：清空上下文（复用同一个后台窗口，只是让它回到首页） */
+  async newSession() {
+    const webContents = await this.ensureWorker();
+    if (!webContents) return false;
+    try {
+      webContents.send('cs:new-chat', {});
     } catch (err) {
       log.warn(`新建会话失败: ${err.message}`);
       return false;
@@ -354,14 +416,7 @@ class QuickAskWindow {
   async ask(text) {
     const question = String(text || '').trim();
     if (!question) return;
-
-    const win = this.ctx.windows.target();
-    const isNew = !this.ownTab;
-    const tab = this.ensureOwnTab();
-    if (!tab || !win) {
-      this.setState({ phase: 'error', note: '没能创建会话标签（主窗口不可用）' });
-      return;
-    }
+    if (this.state.phase === 'sending' || this.state.phase === 'generating') return;
 
     // 先记一轮新对话，答案留空后面增量填
     const turn = { q: question, a: '', reasoning: '', note: '' };
@@ -373,13 +428,20 @@ class QuickAskWindow {
     };
     this.push();
 
-    // 刚创建的标签页还在加载 —— 不等它，preload 就还没挂上监听，消息会静默丢失。
-    // （站点页那边的 applyPrompt 也会重试等输入框，这里是双保险。）
-    if (isNew) await waitForTabLoad(tab);
+    const webContents = await this.ensureWorker();
+    if (!webContents) {
+      this.setState({ phase: 'error', note: '没能创建后台会话' });
+      return;
+    }
+    clearTimeout(this._blurTimer);
+    if (this.win && !this.win.isDestroyed()) {
+      this.win.show();
+      this.win.focus();
+    }
 
     try {
-      win.sendToTab(tab, 'cs:watch-answer', { on: true }); // 先挂监听，避免答案比监听先到
-      win.sendToTab(tab, 'cs:prompt', { text: question, submit: true });
+      webContents.send('cs:watch-answer', { on: true });
+      webContents.send('cs:prompt', { text: question, submit: true });
     } catch (err) {
       this.setState({ phase: 'error', note: `投递失败: ${err.message}` });
       return;
@@ -393,9 +455,9 @@ class QuickAskWindow {
     const last = turns.length ? { ...turns[turns.length - 1] } : null;
     if (!last) return;
     if (info.ok) {
-      last.note = '生成中…';
+      last.note = '正在思考…';
       turns[turns.length - 1] = last;
-      this.state = { ...this.state, phase: 'generating', turns, note: '生成中…' };
+      this.state = { ...this.state, phase: 'generating', turns, note: '正在思考…' };
     } else {
       last.note = info.reason || '发送失败';
       turns[turns.length - 1] = last;
@@ -414,14 +476,14 @@ class QuickAskWindow {
     last.reasoning = info.reasoning || '';
 
     if (!info.done) {
-      last.note = '生成中…';
+      last.note = last.a ? '正在回答…' : last.reasoning ? '正在思考…' : '等待回复…';
       turns[turns.length - 1] = last;
-      this.state = { ...this.state, phase: 'generating', turns, note: '生成中…' };
+      this.state = { ...this.state, phase: 'generating', turns, note: last.note };
       this.push();
       return;
     }
 
-    if (!info.gotSomething && !last.a) {
+    if (!info.gotSomething && !last.a && !last.reasoning) {
       last.note = info.timeout ? '等了 2 分钟没等到回复（页面可能被拦或没登录）' : '没读到回复内容';
       turns[turns.length - 1] = last;
       this.state = { ...this.state, phase: 'error', turns, note: last.note };
@@ -454,8 +516,13 @@ class QuickAskWindow {
   destroy() {
     clearTimeout(this._blurTimer);
     this._drag = null;
+    screen.removeListener('display-added', this._reparkWorker);
+    screen.removeListener('display-removed', this._reparkWorker);
+    screen.removeListener('display-metrics-changed', this._reparkWorker);
     if (this.win && !this.win.isDestroyed()) this.win.destroy();
+    if (this.worker && !this.worker.isDestroyed()) this.worker.destroy();
     this.win = null;
+    this.worker = null;
   }
 }
 
